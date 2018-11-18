@@ -4,10 +4,12 @@
 {-# language TypeApplications #-}
 module Parser where
 
+import Bound.Scope (abstract1, instantiate1)
 import Control.Applicative ((<|>), empty, some, many, optional)
 import Control.Monad ((<=<))
-import Data.Bifunctor (first)
+import Data.Bifunctor (bimap)
 import Data.Char (isLower, isLetter, isSpace, isAscii)
+import Data.Foldable (foldl')
 import Data.ListLike (ListLike)
 import Data.Maybe (fromMaybe)
 import Data.Void (Void)
@@ -18,7 +20,7 @@ import Text.Earley
 import qualified Text.Megaparsec as MP
 import qualified Text.Megaparsec.Char as MP
 
-import Syntax (Part(..), Decl(..), Expr(..))
+import Syntax (Part(..), Decl(..), Expr(..), lam, apply)
 
 data Token
   = Ident String
@@ -90,43 +92,37 @@ space =
     _ -> False
 
 partGrammar
-  :: ([Part String], Expr)
-  -> Prod r e Token Expr
-  -> Prod r e Token Expr
-partGrammar (ps, val) expr = subst <$> go ps
+  :: ([Part String], Expr String)
+  -> Prod r e Token (Expr String)
+  -> Prod r e Token (Expr String)
+partGrammar (ps, val) expr = uncurry (foldl' $ flip apply) <$> go ps
   where
-    remove x [] = []
-    remove x ((x', a) : rest)
-      | x == x' = remove x rest
-      | otherwise = (x', a) : remove x rest
+    go [] = pure (val, [])
+    go (Word s' : ps') = word s' *> optional space *> go ps'
+    go (Hole s' : ps') =
+      (\e -> bimap (lam s') (e :)) <$>
+      expr <*>
+      go ps'
 
-    subst (ns, Var s) = fromMaybe (Var s) $ lookup s ns
-    subst (ns, App a b) = App (subst (ns, a)) (subst (ns, b))
-    subst (ns, Lam x e) = Lam x $ subst (remove x ns, e)
-
-    go [] = pure ([], val)
-    go (Word s' : ps') = word s' *> space *> go ps'
-    go (Hole s' : ps') = (\e -> first ((s', e) :)) <$> expr <*> go ps'
-
-exprG :: [([Part String], Expr)] -> Grammar r (Prod r e Token Expr)
+exprG :: [([Part String], Expr String)] -> Grammar r (Prod r e Token (Expr String))
 exprG ctx = do
   var <- rule $ Var <$> ident <* optional space
   rec
     app <- rule $ App <$> e <*> atom
-    lam <-
+    lambda <-
       rule $
-      Lam <$ keyword "\\" <* optional space <*>
-      ident <* keyword "." <* optional space <*>
+      lam <$ keyword "\\" <* optional space <*>
+      ident <* optional space <* keyword "." <* optional space <*>
       e
     atom <-
       rule $
       var <|>
       keyword "(" *> optional space *> e <* keyword ")" <* optional space
     p <- rule $ foldr (\p g -> partGrammar p atom <|> g) empty ctx
-    e <- rule $ atom <|> app <|> lam <|> p
+    e <- rule $ atom <|> app <|> lambda <|> p
   pure e
 
-declG :: [([Part String], Expr)] -> Grammar r (Prod r e Token Decl)
+declG :: [([Part String], Expr String)] -> Grammar r (Prod r e Token Decl)
 declG ctx = do
   expr <- exprG ctx
   binding <-
@@ -147,7 +143,7 @@ declG ctx = do
   rule $ (binding <|> syntax) <* optional newline
 
 parseDecl
-  :: [([Part String], Expr)]
+  :: [([Part String], Expr String)]
   -> [Token]
   -> Either ([Decl], Report e [Token]) Decl
 parseDecl ctx s =

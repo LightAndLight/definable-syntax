@@ -21,5 +21,6 @@ library
   build-depends:       base >=4.11 && <5
                      , Earley, ListLike
                      , megaparsec
+                     , bound, deriving-compat
   hs-source-dirs:      src
   default-language:    Haskell2010
