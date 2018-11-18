@@ -7,7 +7,7 @@ data Part a
 
 data Decl
   = Binding String Expr
-  | Syntax String [Part String] Expr
+  | Syntax [Part String] Expr
   deriving (Eq, Show)
 
 data Expr

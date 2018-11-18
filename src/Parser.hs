@@ -1,4 +1,5 @@
 {-# language FlexibleContexts #-}
+{-# language LambdaCase #-}
 {-# language RecursiveDo #-}
 {-# language TypeApplications #-}
 module Parser where
@@ -89,12 +90,10 @@ space =
     _ -> False
 
 partGrammar
-  :: (String, [Part String], Expr)
+  :: ([Part String], Expr)
   -> Prod r e Token Expr
   -> Prod r e Token Expr
-partGrammar (s, ps, val) expr =
-  subst <$ word s <* optional space <*>
-  go ps
+partGrammar (ps, val) expr = subst <$> go ps
   where
     remove x [] = []
     remove x ((x', a) : rest)
@@ -109,7 +108,7 @@ partGrammar (s, ps, val) expr =
     go (Word s' : ps') = word s' *> space *> go ps'
     go (Hole s' : ps') = (\e -> first ((s', e) :)) <$> expr <*> go ps'
 
-exprG :: [(String, [Part String], Expr)] -> Grammar r (Prod r e Token Expr)
+exprG :: [([Part String], Expr)] -> Grammar r (Prod r e Token Expr)
 exprG ctx = do
   var <- rule $ Var <$> ident <* optional space
   rec
@@ -127,7 +126,7 @@ exprG ctx = do
     e <- rule $ atom <|> app <|> lam <|> p
   pure e
 
-declG :: [(String, [Part String], Expr)] -> Grammar r (Prod r e Token Decl)
+declG :: [([Part String], Expr)] -> Grammar r (Prod r e Token Decl)
 declG ctx = do
   expr <- exprG ctx
   binding <-
@@ -143,13 +142,12 @@ declG ctx = do
   syntax <-
     rule $
     Syntax <$ token TkSyntax <* space <*>
-    anyWord <* space <*>
-    many part <* keyword "=" <* space <*>
+    some part <* keyword "=" <* space <*>
     expr
   rule $ (binding <|> syntax) <* optional newline
 
 parseDecl
-  :: [(String, [Part String], Expr)]
+  :: [([Part String], Expr)]
   -> [Token]
   -> Either ([Decl], Report e [Token]) Decl
 parseDecl ctx s =
@@ -164,10 +162,13 @@ parseDecls = go [] . lines
   where
     go ctx [] = Right []
     go ctx (l:ls) =
-      case tokenize ((\(a, _, _) -> a) <$> ctx) l of
+      case tokenize reserved l of
         Nothing -> error "tokenize failed"
         Just tks ->
           case parseDecl ctx tks of
-            Right a@(Syntax s n e) -> (a :) <$> go ((s, n, e) : ctx) ls
+            Right a@(Syntax n e) -> (a :) <$> go ((n, e) : ctx) ls
             Right a -> (a :) <$> go ctx ls
             Left e -> Left e
+      where
+        reserved =
+          foldMap (\(a, _) -> foldMap (\case; Word a -> [a]; _ -> []) a) ctx
