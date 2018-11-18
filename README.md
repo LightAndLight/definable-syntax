@@ -30,3 +30,5 @@ a syntax definition. For example, the `b` in `syntax a = b` shouldn't be
 captured in the term `\b. a`. Maybe identifiers should be qualified by
 whether or not they were introduced to a term via a syntax definition. Maybe
 qualification by origin is enough.
+
+This isn't a problem in a locally nameless setting.
